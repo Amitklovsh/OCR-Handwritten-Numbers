@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import sys
 import time
+import subprocess
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from PySide6 import QtCore, QtWidgets
 
@@ -16,6 +17,7 @@ class WorkerSignals(QtCore.QObject):
     progress = QtCore.Signal(str)
     done = QtCore.Signal()
     error = QtCore.Signal(str)
+    last_output = QtCore.Signal(str)
 
 
 class Worker(QtCore.QRunnable):
@@ -26,6 +28,10 @@ class Worker(QtCore.QRunnable):
         self.base_name = base_name
         self.cfg_template = cfg_template
         self.signals = WorkerSignals()
+        # Back-compat aliases for older UI wiring
+        self.sig_progress = self.signals.progress
+        self.sig_done = self.signals.done
+        self.sig_error = self.signals.error
 
     @QtCore.Slot()
     def run(self) -> None:  # type: ignore[override]
@@ -50,6 +56,7 @@ class Worker(QtCore.QRunnable):
                 export_tables_to_workbook(out_path, tables, sheet_infos)
                 dt = int((time.perf_counter() - t0) * 1000)
                 self.signals.progress.emit(f"Saved {out_path} in {dt} ms ({len(tables)} tables)")
+                self.signals.last_output.emit(out_path)
             self.signals.done.emit()
         except Exception as e:
             self.signals.error.emit(str(e))
@@ -61,6 +68,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Table OCR to Excel - Brute Force")
         self._build_ui()
         self.pool = QtCore.QThreadPool.globalInstance()
+        self.last_excel_path: Optional[str] = None
 
     def _build_ui(self) -> None:
         w = QtWidgets.QWidget(self)
@@ -116,8 +124,15 @@ class MainWindow(QtWidgets.QMainWindow):
         var_row.addWidget(QtWidgets.QLabel("Allowlist"))
         var_row.addWidget(self.allow_edit)
 
-        # Start button and log
+        # Start/Open buttons and log
+        buttons_row = QtWidgets.QHBoxLayout()
         self.btn_start = QtWidgets.QPushButton("Start")
+        self.btn_open_last = QtWidgets.QPushButton("Open Last Excel")
+        self.btn_open_last.setEnabled(False)
+        buttons_row.addWidget(self.btn_start)
+        buttons_row.addWidget(self.btn_open_last)
+        buttons_row.addStretch()
+
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
 
@@ -132,7 +147,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addLayout(tess_layout)
         lay.addLayout(var_row)
         lay.addSpacing(8)
-        lay.addWidget(self.btn_start)
+        lay.addLayout(buttons_row)
         lay.addWidget(self.log)
 
         self.setCentralWidget(w)
@@ -142,6 +157,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_clear_images.clicked.connect(self.image_list.clear)
         self.btn_browse_out.clicked.connect(self.on_browse_out)
         self.btn_start.clicked.connect(self.on_start)
+        self.btn_open_last.clicked.connect(self.on_open_last)
 
     def on_add_images(self) -> None:
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(self, "Select images", os.getcwd(), "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
@@ -189,9 +205,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.setEnabled(False)
         self._log("Starting recognition. No further prompts will be shown.")
         worker = Worker(images, out_dir, base_name, cfg_template)
+        # New-style connections
         worker.signals.progress.connect(self._log)
         worker.signals.done.connect(self._on_done)
         worker.signals.error.connect(self._on_error)
+        worker.signals.last_output.connect(self._on_last_output)
+        # Back-compat: if old code path uses sig_* aliases, they point to same signals
         self.pool.start(worker)
 
     def _log(self, msg: str) -> None:
@@ -204,6 +223,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_error(self, msg: str) -> None:
         self._log(f"Error: {msg}")
         self.btn_start.setEnabled(True)
+
+    def _on_last_output(self, path: str) -> None:
+        self.last_excel_path = path
+        self.btn_open_last.setEnabled(True)
+        self._log(f"Last Excel: {path}")
+
+    def on_open_last(self) -> None:
+        if not self.last_excel_path or not os.path.exists(self.last_excel_path):
+            self._log("No Excel file to open yet.")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(self.last_excel_path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", self.last_excel_path])
+            else:
+                subprocess.Popen(["xdg-open", self.last_excel_path])
+        except Exception as e:
+            self._log(f"Failed to open: {e}")
 
 
 def main() -> None:
