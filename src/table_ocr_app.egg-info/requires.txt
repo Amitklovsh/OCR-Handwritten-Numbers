@@ -1,0 +1,16 @@
+opencv-python-headless
+numpy
+Pillow
+pytesseract
+pandas
+openpyxl
+scikit-image
+scipy
+rich
+PyYAML
+
+[ocr]
+easyocr
+
+[ui]
+PySide6

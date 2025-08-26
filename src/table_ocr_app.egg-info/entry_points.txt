@@ -1,0 +1,3 @@
+[console_scripts]
+table-ocr-cli = table_ocr_app.cli:main
+table-ocr-gui = table_ocr_app.qt_app:main
