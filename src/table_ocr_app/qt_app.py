@@ -12,17 +12,20 @@ from .orchestrator import RecognitionOrchestrator, RunConfig
 from .excel_export import export_tables_to_workbook, SheetInfo
 
 
-class Worker(QtCore.QRunnable):
-    sig_progress = QtCore.Signal(str)
-    sig_done = QtCore.Signal()
-    sig_error = QtCore.Signal(str)
+class WorkerSignals(QtCore.QObject):
+    progress = QtCore.Signal(str)
+    done = QtCore.Signal()
+    error = QtCore.Signal(str)
 
+
+class Worker(QtCore.QRunnable):
     def __init__(self, images: List[str], out_dir: str, base_name: str, cfg_template: RunConfig) -> None:
         super().__init__()
         self.images = images
         self.out_dir = out_dir
         self.base_name = base_name
         self.cfg_template = cfg_template
+        self.signals = WorkerSignals()
 
     @QtCore.Slot()
     def run(self) -> None:  # type: ignore[override]
@@ -38,7 +41,7 @@ class Worker(QtCore.QRunnable):
                     tesseract_oem=self.cfg_template.tesseract_oem,
                     allowlist=self.cfg_template.allowlist,
                 )
-                self.sig_progress.emit(f"Processing {os.path.basename(img)}...")
+                self.signals.progress.emit(f"Processing {os.path.basename(img)}...")
                 orch = RecognitionOrchestrator(cfg)
                 outputs = orch.run()
                 tables = [ot.table for ot in outputs]
@@ -46,10 +49,10 @@ class Worker(QtCore.QRunnable):
                 out_path = os.path.join(self.out_dir, f"{self.base_name}-{os.path.splitext(os.path.basename(img))[0]}.xlsx")
                 export_tables_to_workbook(out_path, tables, sheet_infos)
                 dt = int((time.perf_counter() - t0) * 1000)
-                self.sig_progress.emit(f"Saved {out_path} in {dt} ms ({len(tables)} tables)")
-            self.sig_done.emit()
+                self.signals.progress.emit(f"Saved {out_path} in {dt} ms ({len(tables)} tables)")
+            self.signals.done.emit()
         except Exception as e:
-            self.sig_error.emit(str(e))
+            self.signals.error.emit(str(e))
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -186,9 +189,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.setEnabled(False)
         self._log("Starting recognition. No further prompts will be shown.")
         worker = Worker(images, out_dir, base_name, cfg_template)
-        worker.sig_progress.connect(self._log)
-        worker.sig_done.connect(self._on_done)
-        worker.sig_error.connect(self._on_error)
+        worker.signals.progress.connect(self._log)
+        worker.signals.done.connect(self._on_done)
+        worker.signals.error.connect(self._on_error)
         self.pool.start(worker)
 
     def _log(self, msg: str) -> None:
