@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: table-ocr-app
+Version: 0.1.0
+Requires-Dist: opencv-python-headless
+Requires-Dist: numpy
+Requires-Dist: Pillow
+Requires-Dist: pytesseract
+Requires-Dist: pandas
+Requires-Dist: openpyxl
+Requires-Dist: scikit-image
+Requires-Dist: scipy
+Requires-Dist: rich
+Requires-Dist: PyYAML
+Provides-Extra: ui
+Requires-Dist: PySide6; extra == "ui"
+Provides-Extra: ocr
+Requires-Dist: easyocr; extra == "ocr"
